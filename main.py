@@ -1,52 +1,105 @@
 import telebot
 import os
 from flask import Flask
+from datetime import datetime, timedelta
 
-# I-setup ang Bot at Flask
+# --- CONFIGURATION ---
 TOKEN = "8761481105:AAF-dwHd9g4ZOG0HDlfDRTag4kWEcSTw7oU"
+ADMIN_ID = 6763595343  # Your Verified Admin ID
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 DATA_FILE = "verified_ids.txt"
+SETTINGS_FILE = "settings.txt"
 
-# Siguraduhing existing ang file
-if not os.path.exists(DATA_FILE):
-    open(DATA_FILE, 'w').close()
+# Ensure files exist
+for f in [DATA_FILE, SETTINGS_FILE]:
+    if not os.path.exists(f):
+        open(f, 'w').close()
 
-def get_verified_ids():
+def get_default_days():
+    try:
+        with open(SETTINGS_FILE, "r") as f:
+            val = f.read().strip()
+            return int(val) if val else 7
+    except:
+        return 7
+
+def set_default_days(days):
+    with open(SETTINGS_FILE, "w") as f:
+        f.write(str(days))
+
+def get_verified_data():
+    data = {}
     with open(DATA_FILE, "r") as f:
-        return f.read().splitlines()
+        for line in f:
+            if "|" in line:
+                uid, expiry = line.strip().split("|")
+                data[uid] = expiry
+    return data
 
-# --- WEB API PARA SA LUA APP ---
+def save_id(uid, days):
+    expiry_date = (datetime.now() + timedelta(days=int(days))).strftime("%Y-%m-%d")
+    with open(DATA_FILE, "a") as f:
+        f.write(f"{uid}|{expiry_date}\n")
+    return expiry_date
+
+# --- WEB API ---
 @app.route('/check/<user_id>', methods=['GET'])
 def check_id(user_id):
-    ids = get_verified_ids()
-    if user_id in ids:
-        return "VERIFIED", 200
+    data = get_verified_data()
+    if user_id in data:
+        expiry_str = data[user_id]
+        expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d")
+        if datetime.now().date() <= expiry_date.date():
+            return f"VERIFIED|{expiry_str}", 200
+        else:
+            return "EXPIRED", 403
     return "DENIED", 403
 
-# --- TELEGRAM BOT COMMANDS ---
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "Zenkai Protect System\nGamitin ang /add [ID] para magbigay ng access.")
+# --- BOT COMMANDS ---
+@bot.message_handler(commands=['setdays'])
+def admin_set_days(message):
+    if message.from_user.id == ADMIN_ID:
+        try:
+            days = int(message.text.split()[1])
+            set_default_days(days)
+            bot.reply_to(message, f"⚙️ **Admin Panel:** New registration period set to **{days} days**.")
+        except:
+            bot.reply_to(message, "❌ Usage: `/setdays [number]`")
+    else:
+        bot.reply_to(message, "🚫 You are not authorized.")
 
 @bot.message_handler(commands=['add'])
-def add_id(message):
-    try:
-        new_id = message.text.split()[1]
-        ids = get_verified_ids()
-        if new_id not in ids:
-            with open(DATA_FILE, "a") as f:
-                f.write(f"{new_id}\n")
-            bot.reply_to(message, f"✅ Success: ID {new_id} is now verified.")
-        else:
-            bot.reply_to(message, "ℹ️ ID is already in the list.")
-    except IndexError:
-        bot.reply_to(message, "❌ Format: /add [ID_DITO]")
+def admin_add_id(message):
+    if message.from_user.id == ADMIN_ID:
+        try:
+            new_id = message.text.split()[1]
+            current_setting = get_default_days()
+            expiry = save_id(new_id, current_setting)
+            
+            success_msg = f"""
+╔════════════════════╗
+⚡️  [ACCESS GRANTED]  ⚡️
+╚════════════════════╝
 
-# Para tumakbo ang dalawa sa Railway
+Registration: **SUCCESS**
+Validity: **{current_setting} Days**
+Expires on: **{expiry}**
+
+╔════════════════════╗
+
+🆔 {new_id}
+
+╚════════════════════╝
+            """
+            bot.reply_to(message, success_msg)
+        except:
+            bot.reply_to(message, "❌ Usage: `/add [ID]`")
+    else:
+        bot.reply_to(message, "🚫 You are not authorized.")
+
 if __name__ == "__main__":
     from threading import Thread
     Thread(target=lambda: bot.infinity_polling()).start()
-    # Railway uses port 8080 by default
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
