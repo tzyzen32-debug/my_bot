@@ -43,6 +43,7 @@ def get_verified_data():
     return data
 
 def save_id(uid, days):
+    # Check kung existing na para hindi doble
     data = get_verified_data()
     if uid in data:
         return "ALREADY_EXISTS"
@@ -65,39 +66,35 @@ def check_id(user_id):
             return "EXPIRED", 403
     return "DENIED", 403
 
-# --- DYNAMIC QUOTE LOGIC (Ikaw lang pwedeng gumamit) ---
+# --- BOT COMMANDS ---
+
+# DYNAMIC QUOTE LOGIC (Heto ang dinagdag ko base sa gusto mo)
 @bot.message_handler(func=lambda message: message.text and message.text.lower().startswith("hello"))
 def dynamic_shoutout(message):
     if message.from_user.id == ADMIN_ID:
-        # Hahanapin ang text sa loob ng quotes ""
         match = re.search(r'"([^"]*)"', message.text)
-        
         if match:
-            custom_text = match.group(1) 
-            
-            # Hahanapin kung sino ang imemention (pagkatapos ng "si")
+            custom_text = match.group(1)
             if "si" in message.text.lower():
                 try:
                     parts = message.text.lower().split("si")
-                    # Kinukuha ang target name at tinatanggal ang part na may quotes
                     target_name = message.text[len(parts[0]) + 3:].strip()
                     target_name = re.sub(r'"([^"]*)"', '', target_name).strip()
-                    
                     bot.send_message(message.chat.id, f"{custom_text} {target_name}")
                 except:
                     bot.send_message(message.chat.id, custom_text)
             else:
                 bot.send_message(message.chat.id, custom_text)
 
-# --- BOT COMMANDS ---
-
 @bot.message_handler(commands=['idlist'])
 def admin_id_list(message):
+    """Admin only: List all registered IDs"""
     if message.from_user.id == ADMIN_ID:
         data = get_verified_data()
         if not data:
             bot.reply_to(message, "📂 Walang IDs sa database.")
             return
+        
         output = "📋 **REGISTERED IDs:**\n\n"
         for uid, exp in data.items():
             output += f"🆔 `{uid}` — 📅 {exp}\n"
@@ -107,6 +104,7 @@ def admin_id_list(message):
 
 @bot.message_handler(commands=['setdays'])
 def admin_set_days(message):
+    """Admin only: Change default expiry days"""
     if message.from_user.id == ADMIN_ID:
         try:
             days = int(message.text.split()[1])
@@ -119,21 +117,39 @@ def admin_set_days(message):
 
 @bot.message_handler(commands=['add'])
 def public_add_id(message):
+    """Public: Anyone can register an ID"""
     try:
         args = message.text.split()
         if len(args) < 2:
             bot.reply_to(message, "❌ Usage: `/add [ID]`")
             return
+
         new_id = args[1]
         current_setting = get_default_days()
         result = save_id(new_id, current_setting)
+        
         if result == "ALREADY_EXISTS":
-            bot.reply_to(message, f"⚠️ Ang ID `{new_id}` ay registered na.")
+            bot.reply_to(message, f"⚠️ ID `{new_id}` already use registered.")
             return
-        success_msg = f"╔════════════════════╗\n⚡️  [ACCESS GRANTED]  ⚡️\n╚════════════════════╝\n\nRegistration: **SUCCESS**\nValidity: **{current_setting} Days**\nExpires on: **{result}**\n\n🆔 `{new_id}`"
-        bot.reply_to(message, success_msg, parse_mode="Markdown")
-    except:
-        bot.reply_to(message, "❌ May error sa pag-add ng ID.")
+
+        success_msg = f"""
+╔═════════════╗
+⚡️  [ACCESS GRANTED]  ⚡️
+╚═════════════╝
+
+Registration: **SUCCESS**
+Validity: **{current_setting} Days**
+Expires on: **{result}**
+
+╔══════╗
+
+🆔 {new_id}
+
+╚══════╝
+        """
+        bot.reply_to(message, success_msg)
+    except Exception as e:
+        bot.reply_to(message, "❌ error not register ID.")
 
 if __name__ == "__main__":
     from threading import Thread
