@@ -1,6 +1,5 @@
 import telebot
 import os
-import re
 from flask import Flask
 from datetime import datetime, timedelta
 
@@ -68,24 +67,6 @@ def check_id(user_id):
 
 # --- BOT COMMANDS ---
 
-# DYNAMIC QUOTE LOGIC (Heto ang dinagdag ko base sa gusto mo)
-@bot.message_handler(func=lambda message: message.text and message.text.lower().startswith("hello"))
-def dynamic_shoutout(message):
-    if message.from_user.id == ADMIN_ID:
-        match = re.search(r'"([^"]*)"', message.text)
-        if match:
-            custom_text = match.group(1)
-            if "si" in message.text.lower():
-                try:
-                    parts = message.text.lower().split("si")
-                    target_name = message.text[len(parts[0]) + 3:].strip()
-                    target_name = re.sub(r'"([^"]*)"', '', target_name).strip()
-                    bot.send_message(message.chat.id, f"{custom_text} {target_name}")
-                except:
-                    bot.send_message(message.chat.id, custom_text)
-            else:
-                bot.send_message(message.chat.id, custom_text)
-
 @bot.message_handler(commands=['idlist'])
 def admin_id_list(message):
     """Admin only: List all registered IDs"""
@@ -129,27 +110,27 @@ def public_add_id(message):
         result = save_id(new_id, current_setting)
         
         if result == "ALREADY_EXISTS":
-            bot.reply_to(message, f"⚠️ ID `{new_id}` already use registered.")
+            bot.reply_to(message, f"⚠️ Ang ID `{new_id}` ay registered na.")
             return
 
         success_msg = f"""
-╔═════════════╗
+╔════════════╗
 ⚡️  [ACCESS GRANTED]  ⚡️
-╚═════════════╝
+╚════════════╝
 
 Registration: **SUCCESS**
 Validity: **{current_setting} Days**
 Expires on: **{result}**
 
-╔══════╗
+╔═════╗
 
 🆔 {new_id}
 
-╚══════╝
+╚═════╝
         """
         bot.reply_to(message, success_msg)
     except Exception as e:
-        bot.reply_to(message, "❌ error not register ID.")
+        bot.reply_to(message, "❌ May error sa pag-add ng ID.")
 
 if __name__ == "__main__":
     from threading import Thread
