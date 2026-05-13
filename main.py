@@ -1,55 +1,74 @@
 import telebot
 import os
+import requests
 from flask import Flask
 from datetime import datetime, timedelta
+from threading import Thread
 
 # --- CONFIGURATION ---
 TOKEN = "8761481105:AAF-dwHd9g4ZOG0HDlfDRTag4kWEcSTw7oU"
-ADMIN_ID = 6763595343  # Iyong Verified Admin ID
+ADMIN_ID = 6763595343  # Your Verified Admin ID
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-DATA_FILE = "verified_ids.txt"
-SETTINGS_FILE = "settings.txt"
+# --- JSONBIN CONFIGURATION ---
+JSONBIN_ID = "6a045ab4c0954111d818cdd9"
+JSONBIN_API_KEY = "$2a$10$YmXKZU4F0UjFeOAY3CPuXeg9OsECrYk2zN4eb65PW8YSAYfFxM6Mq"
+JSONBIN_URL = f"https://api.jsonbin.io/v3/b/{JSONBIN_ID}"
+HEADERS = {
+    "X-Master-Key": JSONBIN_API_KEY,
+    "Content-Type": "application/json"
+}
 
-# Siguraduhing existing ang mga files
-for f in [DATA_FILE, SETTINGS_FILE]:
-    if not os.path.exists(f):
-        open(f, 'w').close()
+# --- DATABASE FUNCTIONS (CLOUD STORAGE) ---
+
+def get_remote_data():
+    """Fetch data from JSONBin Cloud"""
+    try:
+        response = requests.get(f"{JSONBIN_URL}/latest", headers=HEADERS)
+        if response.status_code == 200:
+            return response.json()["record"]
+        else:
+            return {"verified_ids": {}, "default_days": 7}
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return {"verified_ids": {}, "default_days": 7}
+
+def save_remote_data(data):
+    """Save data to JSONBin Cloud"""
+    try:
+        requests.put(JSONBIN_URL, headers=HEADERS, json=data)
+    except Exception as e:
+        print(f"Error saving data: {e}")
 
 def get_default_days():
+    data = get_remote_data()
     try:
-        with open(SETTINGS_FILE, "r") as f:
-            val = f.read().strip()
-            return int(val) if val else 7
+        return int(data.get("default_days", 7))
     except:
         return 7
 
 def set_default_days(days):
-    with open(SETTINGS_FILE, "w") as f:
-        f.write(str(days))
+    data = get_remote_data()
+    data["default_days"] = int(days)
+    save_remote_data(data)
 
 def get_verified_data():
-    data = {}
-    if not os.path.exists(DATA_FILE):
-        return data
-    with open(DATA_FILE, "r") as f:
-        for line in f:
-            line = line.strip()
-            if "|" in line:
-                uid, expiry = line.split("|")
-                data[uid] = expiry
-    return data
+    data = get_remote_data()
+    return data.get("verified_ids", {})
 
 def save_id(uid, days):
-    # Check kung existing na para hindi doble
-    data = get_verified_data()
-    if uid in data:
+    full_data = get_remote_data()
+    verified_ids = full_data.get("verified_ids", {})
+
+    if str(uid) in verified_ids:
         return "ALREADY_EXISTS"
     
     expiry_date = (datetime.now() + timedelta(days=int(days))).strftime("%Y-%m-%d")
-    with open(DATA_FILE, "a") as f:
-        f.write(f"{uid}|{expiry_date}\n")
+    verified_ids[str(uid)] = expiry_date
+    
+    full_data["verified_ids"] = verified_ids
+    save_remote_data(full_data)
     return expiry_date
 
 # --- WEB API ---
@@ -73,7 +92,7 @@ def admin_id_list(message):
     if message.from_user.id == ADMIN_ID:
         data = get_verified_data()
         if not data:
-            bot.reply_to(message, "📂 Walang IDs sa database.")
+            bot.reply_to(message, "📂 No IDs found in the database.")
             return
         
         output = "📋 **REGISTERED IDs:**\n\n"
@@ -110,13 +129,13 @@ def public_add_id(message):
         result = save_id(new_id, current_setting)
         
         if result == "ALREADY_EXISTS":
-            bot.reply_to(message, f"⚠️ Ang ID `{new_id}` ay registered na.")
+            bot.reply_to(message, f"⚠️ The ID `{new_id}` is already registered.")
             return
 
         success_msg = f"""
-╔════════════╗
-⚡️  [ACCESS GRANTED]  ⚡️
-╚════════════╝
+╔═══════════╗
+⚡️[ACCESS GRANTED] ⚡️
+╚═══════════╝
 
 Registration: **SUCCESS**
 Validity: **{current_setting} Days**
@@ -130,10 +149,11 @@ Expires on: **{result}**
         """
         bot.reply_to(message, success_msg)
     except Exception as e:
-        bot.reply_to(message, "❌ May error sa pag-add ng ID.")
+        bot.reply_to(message, "❌ An error occurred while adding the ID.")
 
 if __name__ == "__main__":
-    from threading import Thread
-    print("Bot is starting...")
+    print("Bot is starting with Cloud JSON storage...")
+    # Thread for Bot Polling
     Thread(target=lambda: bot.infinity_polling()).start()
+    # Flask Server for API
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
